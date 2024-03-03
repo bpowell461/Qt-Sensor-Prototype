@@ -1,20 +1,13 @@
-# This Python file uses the following encoding: utf-8
 import sys
 import datetime
 
 from PySide6.QtWidgets import QApplication, QWidget, QTableWidgetItem, QAbstractItemView
 from PySide6.QtCore import QTimer, QEventLoop, QDateTime
 from PySide6.QtGui import QPixmap, QPainter
-import psuedoSensor
-
-# Important:
-# You need to run the following command to generate the ui_form.py file
-#     pyside6-uic form.ui -o ui_form.py, or
-#     pyside2-uic form.ui -o ui_form.py
-from ui_form import Ui_Widget
+import psuedoSensor  # Assuming this is your custom module
+from ui_form import Ui_Widget  # Assuming ui_form.py is generated from a .ui file
 
 sensor = psuedoSensor.PseudoSensor()
-
 alarmImg = "alarm.png"
 
 class ImageWidget(QWidget):
@@ -31,128 +24,96 @@ class Widget(QWidget):
         super().__init__(parent)
         self.ui = Ui_Widget()
         self.ui.setupUi(self)
+        self.setupUI()
 
-        self.ui.tempAlarmSlider.valueChanged.connect(lambda x: self.ui.tempSpinBox.setValue(self.ui.tempAlarmSlider.value()))
-        self.ui.tempSpinBox.valueChanged.connect(lambda x: self.ui.tempAlarmSlider.setValue(self.ui.tempSpinBox.value()))
-        self.ui.humAlarmSlider.valueChanged.connect(lambda x: self.ui.humSpinBox.setValue(self.ui.humAlarmSlider.value()))
-        self.ui.humSpinBox.valueChanged.connect(lambda x: self.ui.humAlarmSlider.setValue(self.ui.humSpinBox.value()))
+    def setupUI(self):
+        self.setupSliders()
+        self.setupTables()
+        self.ui.readingButton.clicked.connect(self.captureReading)
+        self.ui.statButton.clicked.connect(self.calculateStatistics)
 
-        self.ui.statTable.setHorizontalHeaderLabels(['Temperature', 'Humidity'])
+    def setupSliders(self):
+        self.ui.tempAlarmSlider.valueChanged.connect(lambda x: self.ui.tempSpinBox.setValue(x))
+        self.ui.tempSpinBox.valueChanged.connect(lambda x: self.ui.tempAlarmSlider.setValue(x))
+        self.ui.humAlarmSlider.valueChanged.connect(lambda x: self.ui.humSpinBox.setValue(x))
+        self.ui.humSpinBox.valueChanged.connect(lambda x: self.ui.humAlarmSlider.setValue(x))
+
+    def setupTables(self):
+        self.ui.statTable.setHorizontalHeaderLabels(['Humidity', 'Temperature'])
         self.ui.statTable.setVerticalHeaderLabels(['Minimum', 'Maximum', 'Average'])
         self.ui.statTable.horizontalHeader().setStretchLastSection(True)
         self.ui.statTable.verticalHeader().setStretchLastSection(True)
 
         self.ui.tableWidget.setHorizontalHeaderLabels(['Humidity', '', 'Temperature', '', 'Time'])
         self.ui.tableWidget.horizontalHeader().setStretchLastSection(True)
-        self.ui.readingButton.clicked.connect(self.captureReading)
 
-        self.ui.statButton.clicked.connect(self.getStats)
-
-
-    def getStats(self):
-        minHum = float(self.ui.humSpinBox.maximum())
-        minTemp = float(self.ui.tempSpinBox.maximum())
-
-        maxHum = float(self.ui.humSpinBox.minimum())
-        maxTemp = float(self.ui.tempSpinBox.minimum())
-
-        avgHum = 0.0
-        avgTemp = 0.0
-        avgItems = 0
-
-        for i in range(self.ui.tableWidget.rowCount()-1, -1, -1):
-            if(avgItems == 10):
-                break;
+    def calculateStatistics(self):
+        readings = []
+        for i in range(self.ui.tableWidget.rowCount()):
             hum = float(self.ui.tableWidget.item(i, 0).text())
             temp = float(self.ui.tableWidget.item(i, 2).text())
+            readings.append((hum, temp))
 
-            if (hum < minHum):
-                minHum = hum
+        if readings:
+            min_hum = min(readings, key=lambda x: x[0])[0]
+            max_hum = max(readings, key=lambda x: x[0])[0]
+            avg_hum = sum(hum for hum, _ in readings) / len(readings)
 
-            if (temp < minTemp):
-                minTemp = temp
+            min_temp = min(readings, key=lambda x: x[1])[1]
+            max_temp = max(readings, key=lambda x: x[1])[1]
+            avg_temp = sum(temp for _, temp in readings) / len(readings)
 
-            if (hum > maxHum):
-                maxHum = hum
+            self.insertToStatTable(0, [min_hum, min_temp])
+            self.insertToStatTable(1, [max_hum, max_temp])
+            self.insertToStatTable(2, [avg_hum, avg_temp])
 
-            if (temp > maxTemp):
-                maxTemp = temp
+    def insertToStatTable(self, row, values):
+        for col, val in enumerate(values):
+            item = QTableWidgetItem("{:.3f}".format(val))
+            self.ui.statTable.setItem(row, col, item)
 
-            avgHum += hum
-            avgTemp += temp
-            avgItems += 1
-
-
-        avgHum /= (avgItems)
-        avgTemp /= (avgItems)
-
-        self.insertToStatTable(0, 0, minTemp)
-        self.insertToStatTable(0, 1, maxTemp)
-        self.insertToStatTable(0, 2, avgTemp)
-
-        self.insertToStatTable(1, 0, minHum)
-        self.insertToStatTable(1, 1, maxHum)
-        self.insertToStatTable(1, 2, avgHum)
-
-    def insertToStatTable(self, col, row, val):
-        item = QTableWidgetItem()
-        item.setData(0, val)
-        self.ui.statTable.setItem(row, col, item)
-
-    def insertTableItem(self):
-        hum, temp = sensor.generate_values()
-        self.insertItem(hum, temp)
+    def insertTableItem(self, hum, temp):
+        rowPos = self.ui.tableWidget.rowCount()
+        self.ui.tableWidget.insertRow(rowPos)
+        self.insertItem(rowPos, hum, temp)
 
     def captureReading(self):
         if self.ui.continuousButton.isChecked():
-            self.ui.readingButton.setEnabled(False)
-            self.ui.readingButton.setText("Reading...")
-            for i in range(10):
-                self.insertTableItem()
-
-                # GUI Friendly Sleep
-                loop = QEventLoop()
-                QTimer.singleShot(1000, loop.quit)
-                loop.exec()
-            self.ui.readingButton.setEnabled(True)
-            self.ui.readingButton.setText("Capture")
+            self.captureContinuousReadings()
         else:
-            self.insertTableItem()
+            hum, temp = sensor.generate_values()
+            self.insertTableItem(hum, temp)
 
+    def captureContinuousReadings(self):
+        self.ui.readingButton.setEnabled(False)
+        self.ui.readingButton.setText("Reading...")
+        for _ in range(10):
+            hum, temp = sensor.generate_values()
+            self.insertTableItem(hum, temp)
+            self.sleep(1000)  # Sleep for 1 second
+        self.ui.readingButton.setEnabled(True)
+        self.ui.readingButton.setText("Capture")
 
-    def insertItem(self, hum, temp):
+    def insertItem(self, row, hum, temp):
+        self.ui.tableWidget.setItem(row, 0, QTableWidgetItem("{:.3f}".format(hum)))
+        self.ui.tableWidget.setItem(row, 2, QTableWidgetItem("{:.3f}".format(temp)))
 
-        rowPos = self.ui.tableWidget.rowCount()
-        self.ui.tableWidget.insertRow(rowPos)
+        if hum > self.ui.humSpinBox.value():
+            self.ui.tableWidget.setCellWidget(row, 1, ImageWidget(alarmImg, self))
+        if temp > self.ui.tempSpinBox.value():
+            self.ui.tableWidget.setCellWidget(row, 3, ImageWidget(alarmImg, self))
 
-        rowPos = self.ui.tableWidget.rowCount()
-
-        item = QTableWidgetItem()
-        item.setData(0, "{:.3f}".format(hum))
-        self.ui.tableWidget.setItem(rowPos-1, 0, item)
-
-
-        if (hum > self.ui.humSpinBox.value()):
-            imageItem1 = ImageWidget(alarmImg, self)
-            self.ui.tableWidget.setCellWidget(rowPos-1, 1, imageItem1)
-
-
-        item1 = QTableWidgetItem()
-        item1.setData(0, "{:.3f}".format(temp))
-        self.ui.tableWidget.setItem(rowPos-1, 2, item1)
-
-        if (temp > self.ui.tempSpinBox.value()):
-            imageItem1 = ImageWidget(alarmImg, self)
-            self.ui.tableWidget.setCellWidget(rowPos-1, 3, imageItem1)
-
-        item3 = QTableWidgetItem()
-        item3.setData(0, QDateTime(datetime.datetime.now()))
-        self.ui.tableWidget.setItem(rowPos-1, 4, item3)
+        self.ui.tableWidget.setItem(row, 4, QTableWidgetItem(QDateTime.currentDateTime().toString()))
 
         # Force scroll to bottom
-        item = self.ui.tableWidget.item(rowPos-1, 0)
+        item = self.ui.tableWidget.item(row, 0)
         self.ui.tableWidget.scrollToItem(item, QAbstractItemView.PositionAtTop)
-        self.ui.tableWidget.selectRow(rowPos-1)
+        self.ui.tableWidget.selectRow(row)
+
+    def sleep(self, milliseconds):
+        loop = QEventLoop()
+        QTimer.singleShot(milliseconds, loop.quit)
+        loop.exec()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
